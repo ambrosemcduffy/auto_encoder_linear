@@ -7,18 +7,17 @@ from torchvision import datasets, transforms
 
 batch_size = 16
 
-transforms = transforms.Compose([transforms.RandomResizedCrop(224),
-                                 transforms.Grayscale(),
-                                 transforms.ToTensor(),
-                                 transforms.Normalize([0.5],
-                                                      [0.5])
-                                 ])
+transforms = transforms.ToTensor()
 
-train_data = datasets.ImageFolder(root='flower_photos/train/',
-                                  transform=transforms)
+train_data = datasets.MNIST(root='data',
+                            train=True,
+                            download=True,
+                            transform=transforms)
 
-test_data = datasets.ImageFolder(root='flower_photos/test/',
-                                 transform=transforms)
+test_data = datasets.MNIST(root='data',
+                           train=False,
+                           download=True,
+                           transform=transforms)
 
 train_loader = torch.utils.data.DataLoader(train_data,
                                            batch_size=batch_size,
@@ -28,18 +27,28 @@ test_loader = torch.utils.data.DataLoader(test_data,
                                           batch_size=batch_size,
                                           shuffle=True)
 
+data, target = next(iter(train_loader))
+
+plt.imshow(np.squeeze(data[0]), cmap='gray')
+
 
 class AutoEncoder(nn.Module):
     def __init__(self,):
         super(AutoEncoder, self).__init__()
-        self.fc1 = nn.Linear(50176, 128)
-        self.fc2 = nn.Linear(128, 256)
-        self.fc3 = nn.Linear(256, 50176)
-
+        self.conv1 = nn.Conv2d(1, 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(16, 4, 3, padding=1)
+        self.conv3 = nn.Conv2d(4, 16, 3, padding=1)
+        self.conv4 = nn.Conv2d(16, 1 , 3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.sigmoid(self.fc3(x))
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)
+        x = F.relu(self.conv2(x))
+        x = self.pool(x)
+        x = F.upsample(x, scale_factor=2, mode='nearest')
+        x = F.relu(self.conv3(x))
+        x = F.upsample(x, scale_factor=2, mode='nearest')
+        x = F.sigmoid(self.conv4(x))
         return x
 
 
@@ -50,15 +59,18 @@ if torch.cuda.is_available():
 criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-n_epochs = 130
+n_epochs = 10
+noise_factor = 50
 
 for epoch in range(n_epochs):
     train_loss = 0.0
     for data, target in train_loader:
+        noisy_imgs = data + noise_factor * torch.randn(*data.shape)
+        noisy_imgs = np.clip(noisy_imgs, 0., 1.)
         if torch.cuda.is_available():
             data = data.cuda()
-        data = data.view(data.size(0), -1)
-        output = model(data)
+        #data = data.view(data.size(0), -1)
+        output = model(noisy_imgs.cuda())
         optimizer.zero_grad()
         loss = criterion(output, data)
         loss.backward()
@@ -68,9 +80,9 @@ for epoch in range(n_epochs):
 
 
 images, labels = next(iter(test_loader))
-x_flat = images.view(images.size(0), -1)
-out_recon = model.forward(x_flat.cuda())
-out_recon = out_recon.view(batch_size, 224, 224, 1)
+#x_flat = images.view(images.size(0), -1)
+out_recon = model.forward(images.cuda())
+out_recon = out_recon.view(batch_size, 28, 28, 1)
 out_recon = out_recon.cpu().detach().numpy()
 
 
